@@ -5,21 +5,244 @@ output:
     keep_md: true
 ---
 
+In this codebook, we will complete the instrusticons step by step in the given
+order. According to the research pipepline, we will have some processing and
+analytic code in this codebook.
 
-## Loading and preprocessing the data
+## Phase 1: Parsing Data
+
+As you can see from the directory we are working on, we have our dataset as a
+ZIP file we will first unzip the file and gather the dataset from the new 
+directory
+
+```{r}
+#First, let's learn our directory and set it to a variable
+directory <- getwd()
+
+#Let's check for the filename and append it to a variable and unzip that file.
+datazip <-list.files(directory, pattern = ".zip")
+unzip(datazip)
+
+#Check for the name of the dataset and append it to a variable
+filename <- list.files(directory, ".csv")
+
+#Load data and append it to a variable
+activity <- read.csv(file= filename, colClasses = "character", na.strings = "NA")
+
+#Create directory for saving plots
+figurespath <- paste0(directory, "/", "figures")
+suppressWarnings(dir.create(path = figurespath))
+
+#Define column classes
+#Steps: Number of steps taking in a 5-minute interval
+activity$steps <- as.numeric(activity$steps)
+
+#Date : The date on which the measurement was taken in YYYY-MM-DD
+# We will use *lubridate* package to transform date column from character to date
+
+suppressMessages(library(lubridate))
+activity$date <- ymd(activity$date)
+
+#Interval : Identifier for the 5-minute interval in which measurement was taken
+activity$interval <- as.numeric(activity$interval)
+
+#Lets's check out data frame's information. 
+str(activity)
+
+```
+
+## Phase II: Question #1- What is mean total number of steps taken per day?
+
+In order to ask this question, we will create a subsequent table from the *activity*
+dataset which contains the mean and the median for each day. *dplyr* package will be
+used for summarization purposes. After the creation of the table, we will create a histogram
+by using *ggplot2* package. At the end, we will report the daily max, mean and median of
+steps taken. 
+
+```{r}
+library(ggplot2)
+suppressMessages(library(dplyr)) 
+
+spd <- suppressMessages(activity %>% group_by(date) %>% 
+     summarize(sumSteps= sum(steps, na.rm = TRUE))) 
+
+#As we can ignore the incomplete cases, let's remove them
+spd <- spd[complete.cases(spd),]
+
+#Let's check our table before creating a histogram
+head(spd)
+
+```
+
+```{r}
+#Create a histogram
+
+ggplot(data=spd, aes(x=factor(date), y=sumSteps)) +
+     geom_bar(stat="identity", fill="darkblue") +
+     xlab("Dates")+
+     ylab("Steps taken per day") +
+     ggtitle("Steps Taken Per Day") +
+     theme(axis.text.x = element_text(angle = 90, size = 5)) +
+     theme(plot.title = element_text(hjust = 0.5))
+
+#Save the plot
+suppressMessages(ggsave("plot1.png", path = figurespath, device = "png")) 
+```
+
+Let's calculate the mean and median
+
+```{r}
+spd %>% summarize(meanSteps = mean(sumSteps, na.rm = TRUE), 
+                  medianSteps = median(sumSteps, na.rm = TRUE))
+```
 
 
+## Phase III: Question #2: What is the average daily activity pattern?
 
-## What is mean total number of steps taken per day?
+First, group steps by interval and create the table using *ggplot2* package
+
+```{r}
+suppressMessages(stepsInterval <- suppressWarnings(activity %>% group_by(interval) %>% 
+     summarize(average= mean(steps, na.rm = TRUE))))  
+
+#Check the newly created dataset
+head(stepsInterval)
+```
+
+```{r}
+ggplot(data= stepsInterval, aes(x=interval, y= average)) +
+     geom_line() + xlab("5-min Interval") + ylab("Steps Taken") +
+     ggtitle("Average Steps Taken at Each 5-mins Interval") +
+     theme(plot.title = element_text(hjust=0.5, face = "bold"))
+
+#Save the plot
+suppressMessages(ggsave("plot2.png", path = figurespath, device = "png"))
+```
+
+Let's calculate the "In which interval, the steps were at the maximum number on
+average?"
+
+```{r}
+stepsInterval[which.max(stepsInterval$average),]
+
+```
+
+## Phase IV: Imputing Missing Values
+
+1. Calculate the total number of rows with missing values
+
+```{r}
+incomplete_cases <- sum(!complete.cases(activity))
+print( paste0("Number of rows with missing values are : ", as.character(incomplete_cases)))
+```
+
+2. Strategy for filling NAs
+
+My strategy for filling the NAs in each column: Calculate the 5-mins interval for
+each interval and append the calculated value to the NAs for the respective column.
+
+```{r}
+# First, check which columns has NA values
+
+any(is.na(activity$steps))
+any(is.na(activity$date))
+any(is.na(activity$interval))
+```
+
+```{r}
+# Calculte the average steps for each interval. We actually calculated this and
+# stored in *stepsInterval*. Let's see it.
+
+head(stepsInterval)
+```
+3. Creating the new dataset
+As we know which values to append right now, let's create a new dataset with 
+no missing values. We can use *ifelse()* function. We will test if it is NA, if yes,
+append value from *stepsInterval* dataset if no, continue with existing.
+
+```{r}
+newactivity <- activity
+
+newactivity$steps <- ifelse(is.na(newactivity$steps), stepsInterval$average,
+                            newactivity$steps)
+
+```
+
+4. Number of steps taken each day
+
+We will create an histogram for steps taken each day with this new dataset. We
+will first create a table that contains the sum of steps for each day and create
+the plot.
+
+```{r}
+suppressMessages(spd_new <- newactivity %>% group_by(date) %>% summarize(totalSteps = sum(steps)))
+
+ggplot(data=spd_new, aes(x=date, y= totalSteps)) + 
+     geom_bar(stat= "identity", fill= "darkblue")+
+     xlab("Dates")+
+     ylab("Number of Steps") +
+     ggtitle("Steps Taken Per Day (NAs Imputed)") +
+     theme(axis.text.x = element_text(angle = 90, size = 5)) +
+     theme(plot.title = element_text(hjust = 0.5))
+
+#Save the plot
+
+suppressMessages(ggsave("plot3.png", path = figurespath, device = "png"))
+```
+5. Mean and median of steps
+
+We have already created a dataset that contains steps taken in each day. We will
+use that dataset to calculate the mean and median.
+
+```{r}
+
+spd_new %>% summarize(meanSteps = mean(totalSteps), medianSteps = median(totalSteps))
+
+```
+
+## Phase V: Question #3: Are there differences in activity patterns between
+## weekdays and weekends?
+
+First, we will create a new variable called "days". After that, we will create a
+table that contains dates, days, steps per day variables. Lastly, we will create a
+histogram in weekdays/weekends facet style. We will use *lubridate*, *dplyr* and
+*ggplot2* packages. 
+
+```{r}
+#Create days variable
+
+newactivity$days <- weekdays(newactivity$date, abbreviate = TRUE)
+
+#Create a new variable for weekdays/weekends.
+
+newactivity$part <- ifelse(newactivity$days %in% c("Cts", "Paz"), "Weekend", "Weekdays")
+
+# Create a table that summarizes the results by grouping on dates and weekdays/weekends
+suppressMessages(steps_part <- newactivity %>% 
+     group_by(interval,part) %>% summarize(interval = interval,
+                                            totalSteps = mean(steps),
+                                            part = part)) 
+
+#Draw plot
+ggplot(data=steps_part, aes(x=interval, y=totalSteps)) +
+     geom_line() +
+     facet_grid(part ~ .) +
+     xlab("5-min Interval") +
+     ylab("Average Steps Taken") +
+     ggtitle("Comparison of Average Steps Taken in 5- mins Interval \n between Weekdays and Weekands") +
+     theme(plot.title = element_text(hjust = 0.5))
+
+#Save Plot
+suppressMessages(ggsave("plot4.png", path = figurespath, device = "png"))
+```
 
 
+## Phase VI: Knit the Document
 
-## What is the average daily activity pattern?
+```{r}
+library(knitr)
+library(rmarkdown)
+```
 
-
-
-## Imputing missing values
-
-
-
-## Are there differences in activity patterns between weekdays and weekends?
+After loading these packages, click the "Knit" option in the GUI system of RStudio.
+It is in the toolbar of the left upper quadrant window.
